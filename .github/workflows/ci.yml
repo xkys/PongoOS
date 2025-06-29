@@ -1,48 +1,68 @@
 name: CI
 
 on:
-  # Trigger on all pushes and pull requests
   push:
   pull_request:
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04  # 使用最新的LTS版本
     steps:
       - name: Install toolchain
         run: |
+          # 添加checkra1n仓库
           echo 'deb https://assets.checkra.in/debian /' | sudo tee /etc/apt/sources.list.d/checkra1n.list
-          sudo apt-key adv --fetch-keys https://assets.checkra.in/debian/archive.key
+          sudo wget -O /etc/apt/trusted.gpg.d/checkra1n.gpg https://assets.checkra.in/debian/archive.key
+          
+          # 添加LLVM官方仓库（获取更新的工具链）
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s 18
+          
           sudo apt-get update
-          sudo apt-get install -y ld64 cctools-strip
-      - name: Voodoo magic
-        id: voodoo
-        uses: actions/cache@v2
-        with:
-          key: ${{ github.event_name }}-${{ github.ref }}-${{ github.run_id }}
-          restore-keys: |
-            push-${{ github.ref }}-
-            push-
-          path: |
-            **
+          sudo apt-get install -y \
+            ld64 \
+            cctools-strip \
+            clang-18 \
+            llvm-18 \
+            lld-18 \
+            lldb-18 \
+            llvm-18-dev \
+            llvm-18-runtime \
+            libc++-18-dev \
+            libc++abi-18-dev
+
       - name: Checkout repository
-        if: steps.voodoo.outputs.cache-hit != 'true'
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4  # 使用最新版本
         with:
-          submodules: true
+          submodules: recursive
+          fetch-depth: 0  # 获取完整历史记录
+
       - name: Update repository
-        if: steps.voodoo.outputs.cache-hit == 'true'
         run: |
           git fetch --all
           git reset --hard origin/$(git branch --show-current)
           git submodule update --recursive --remote
+
+      - name: Setup cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache
+            build
+          key: ${{ runner.os }}-build-${{ hashFiles('Makefile', '**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
       - name: Compile
-        run: EMBEDDED_CC='clang-10' EMBEDDED_AR='llvm-ar-10' EMBEDDED_RANLIB='llvm-ranlib-10' make all
-      - name: Archive
-        uses: actions/upload-artifact@v2
+        run: |
+          export EMBEDDED_CC='clang-18'
+          export EMBEDDED_AR='llvm-ar-18'
+          export EMBEDDED_RANLIB='llvm-ranlib-18'
+          make clean
+          make all
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: PongoOS
           path: |
@@ -50,3 +70,4 @@ jobs:
             build/Pongo
             build/Pongo.bin
             build/PongoConsolidated.bin
+          retention-days: 7
